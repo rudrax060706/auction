@@ -1,0 +1,111 @@
+import re
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+from .add_command import is_private_chat, is_member, RARITY_MAP, GROUP_URL, CHANNEL_URL, safe_split 
+
+# ====== PHOTO HANDLER ======
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_private_chat(update):
+        return
+    if not update.message or not update.message.photo:
+        return
+    user = update.message.from_user
+    if not user:
+        return
+
+    # membership check
+    if not await is_member(user.id, context):
+        keyboard = [
+            [
+                InlineKeyboardButton("📣 Join Group", url=GROUP_URL),
+                InlineKeyboardButton("📢 Join Channel", url=CHANNEL_URL),
+            ],
+            [InlineKeyboardButton("🔁 Try Again", callback_data="recheck_add")],
+        ]
+        await update.message.reply_text(
+            "<b>⚠️ You need to join our main group and channel to use this feature.</b>\n\n"
+            "<b>Join both using the buttons below, then click 'Try Again'!</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    caption = update.message.caption or ""
+ 
+    # Ensure previous steps completed
+    if not context.user_data.get("type") or not context.user_data.get("rarity"):
+        await update.message.reply_text("⚠️ Please start again using /add.")
+        return
+ 
+    selected_type = context.user_data["type"]
+    selected_rarity = context.user_data["rarity"]
+ 
+    # --- Validation ---
+    if "waifu" in caption.lower() and selected_type != "waifu":
+        await update.message.reply_text("❌ You selected Husbando, but this looks like a Waifu.")
+        return
+    if "husbando" in caption.lower() and selected_type != "husbando":
+        await update.message.reply_text("❌ You selected Waifu, but this looks like a Husbando.")
+        return
+ 
+    found_rarity = next((emoji for emoji in RARITY_MAP if emoji in caption), None)
+    if not found_rarity:
+        await update.message.reply_text(f"⚠️ Please include a rarity emoji in your caption (like {selected_rarity}).")
+        return
+    if found_rarity != selected_rarity:
+        await update.message.reply_text(
+            f"❌ You selected rarity {selected_rarity} ({RARITY_MAP.get(selected_rarity, 'Unknown')}), "
+            f"but your caption has {found_rarity} ({RARITY_MAP.get(found_rarity, 'Unknown')})."
+        )
+        return
+ 
+    # --- Extract Info ---
+    lines = [line.strip() for line in caption.strip().split("\n") if line.strip()]
+    anime_name = "Unknown"
+    waifu_name = "Unknown"
+    optional_tag = "—"
+
+    if len(lines) > 1:
+        anime_name = re.sub(r"\s*\d+\/\d+\.?\s*$", "", lines[1]).strip()
+    if len(lines) > 2:
+        waifu_line = lines[2].strip()
+        parts = waifu_line.split(":")
+        if len(parts) > 1:
+            waifu_name = parts[1].split("x1")[0].strip()
+        else:
+            waifu_name = waifu_line
+    if len(lines) > 3:
+        possible_tag = lines[-1]
+        if "𝗥𝗔𝗥𝗜𝗧𝗬" not in possible_tag:
+            optional_tag = possible_tag
+
+    file_id = update.message.photo[-1].file_id
+
+    # Save temporary data before asking for base bid
+    context.user_data["caption"] = caption
+    context.user_data["anime_name"] = anime_name
+    context.user_data["waifu_name"] = waifu_name
+    context.user_data["optional_tag"] = optional_tag
+    context.user_data["file_id"] = file_id
+
+    # Ask user for base bid
+    await update.message.reply_text(
+    "💰 Please enter the <b>base bid</b> for this item (in numbers only):\n\n"
+    "Or type /cancel to stop this submission.",
+    parse_mode="HTML",
+    )
+    context.user_data["awaiting_bid"] = True  # Mark that we’re waiting for bid next
+
+
+# ====== HANDLERS LIST FOR photo_handler.py ======
+photo_handlers = [
+    MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_photo),
+]

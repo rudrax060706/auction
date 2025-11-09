@@ -1,0 +1,78 @@
+import asyncio
+import nest_asyncio
+from telegram.ext import ApplicationBuilder, CommandHandler
+
+# Configuration and Utilities
+from config import BOT_TOKEN
+from utils.database import init_db
+
+# Handlers from separate files
+from handlers.start_handler import start_command
+from handlers.add_command import add_handlers
+from handlers.photo_handler import photo_handlers
+from handlers.bid_handler import bid_handlers
+from handlers.approval_handler import approval_handlers
+from handlers.auction_bid import auction_bid_handlers
+from handlers.item_command import items_handlers
+from handlers.my_items import myitems_handlers
+from handlers.global_ban import aban, unaban
+from handlers.rm import register_remove_handlers
+from handlers.forceend import forceend_handler
+from handlers.status import status_handler
+from handlers.help import help_handler
+
+# Background Tasks
+from tasks.cleanup import remove_expired_bids
+from tasks.auction_expiry import start_expiry_task
+
+
+async def main():
+    print("🔄 Initializing database...")
+    init_db()
+    print("✅ Database ready.")
+
+    # Create bot application
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # =============== 1️⃣ BASIC COMMANDS ===============
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(help_handler)
+    app.add_handler(CommandHandler("aban", aban))
+    app.add_handler(CommandHandler("unaban", unaban))
+    app.add_handler(status_handler)  # ✅ Add /status handler here
+    app.add_handler(forceend_handler())  # ✅ Ensure /forceend registered once
+        # =============== 2️⃣ COMBINED HANDLERS ===============
+    all_specialized_handlers = (
+        add_handlers +
+        photo_handlers +
+        bid_handlers +
+        approval_handlers +
+        auction_bid_handlers +
+        items_handlers +
+        myitems_handlers
+    )
+
+    # =============== 3️⃣ REGISTER SPECIALIZED HANDLERS ===============
+    for handler in all_specialized_handlers:
+        app.add_handler(handler)
+
+    # =============== 4️⃣ REGISTER REMOVE HANDLERS ===============
+    register_remove_handlers(app)
+
+    # =============== 5️⃣ BACKGROUND TASKS ===============
+    asyncio.create_task(remove_expired_bids(app.bot))
+    asyncio.create_task(start_expiry_task(app.bot, 1))
+
+    print("🤖 Bot is running...")
+    await app.run_polling()
+
+
+# =============== ENTRY POINT ===============
+if __name__ == "__main__":
+    nest_asyncio.apply()
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except KeyboardInterrupt:
+        print("❌ Bot stopped by user.")
+    except Exception as e:
+        print(f"⚠️ An unexpected error occurred: {e}")
