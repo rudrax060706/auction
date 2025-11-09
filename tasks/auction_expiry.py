@@ -167,4 +167,4 @@ async def start_expiry_task(bot, interval: int = 5):
             await check_expired_auctions(bot)
         except Exception as e:
             print(f"⚠️ Expiry task crashed: {e}")
-        await asyncio.sleep(interval * 3600)  # Wait given hours before next check
+        await asyncio.sleep(interval * 60)  # Wait given hours before next check
